@@ -1,0 +1,176 @@
+---
+title: "GapSpanner V0.0.0 Documentation"
+author: "Richard J. Edwards"
+date: "2021-02-01"
+output:
+  html_document:
+    css: http://www.slimsuite.unsw.edu.au/stylesheets/slimhtml.css
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    toc_depth: 3
+    number_sections: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+<a name="Top" />
+
+
+# GapSpanner: Genome assembly gap long read support and reassembly tool
+
+GapSpanner is a wrapper for the gap-spanning and reassembly methods introduced by Diploidocus v0.12.0 and v0.13.0.
+GapSpanner needs a genome assembly (fasta format, `seqin=FILE`) and a set of long read (ONT, PacBio or HiFi) data
+for the assembly (`reads=FILELIST` and `readtype=LIST`).
+
+First, all gaps in the assembly at least 10bp (`mingap=INT`) are identified and saved in a table
+(`$SEQBASE.gaps.tdt`). Long read data is mapped onto the assembly using [Minimap2](https://github.com/lh3/minimap2)
+and reads spanning each gap are identified based on their positions and the target start and end positions in the PAF
+file. In addition to absolute spanning of regions, reads spanning a region +/- distances set by `checkflanks=LIST`
+(default 100bp, 1kb and 5kb) will also be calculated. (If the end of a sequence is reached before the end of the read,
+this will also count as flanking. Such regions can be identified using the `MaxFlank5` and `MaxFlank3` fields, which
+identify the maximum distance 5' and 3' that a read can span due to sequence length constraints.) Gap spanning output
+will be saved to `*.checkpos.tdt`. IDs for reads spanning each gap will also be saved to `$BASEFILE_spanid/`, with
+each gap will be named: `seqname.start-end`.
+
+The `gapass` and `gapfill` run modes will then attempt to re-assemble any gaps spanned by 2+ (using `mingapspan=INT`)
+the [Flye](https://github.com/fenderglass/Flye) assembler. First, long reads are re-mapped to generate BAM output and
+then [samtools](http://www.htslib.org/) (`samtools view` and `samtools fasta`) used to extract the reads that span
+the gap into a file for re-assembly. Gap assemblies will then be farmed out, running `forks=X`
+Flye processes at a time, with each Flye assembly using `subforks=INT` threads. This can take some time, and
+GapSpanner will terminate all running Flye assemblies if none finish within a 10 hour window (`killforks=INT`). This
+can be switched off with `killforks=0`. Assemblies are performed in `$BASEFILE__gapassemble/`.
+
+NOTE: Not all gaps will be successfully re-assembled at this point. See the log file for details.
+
+With `gapfill` run mode, re-assembled gap regions are compiled into `*.assembledgaps.fasta` single file and then
+mapped back on the original assembly using Minimap2, with tabulated hit output into `$BASEFILE__gapfill/`. Local hits
+must be at least 500bp. This stringency can be controlled with `minlocid=PERC` and `minloclen=INT`. Local hits
+are reduced to unique coverage of the assembly sequences and saved to `*.gapfiller.tdt`. Gaps are filled if one of
+the two conditions are met:
+
+1. A single local alignment spans an entire gap.
+2. A pair of concordant local alignments from the same re-assembly contig (same orientation) flank an entire gap.
+
+In the case of a single spanning local alignment, the entire assembly region is replaced by the corresponding
+re-assembly contig region. For a pair of hits, the region between the two hits is replaced. The updated sequences are
+output to `*.fillcheck.fasta` with modified sequences given a `-Xfix` suffix.
+
+Long reads are then mapped on to the updated assembly and the [Diploidocus](https://github.com/slimsuite/diploidocus)
+`regcheck` mode is run a second time to check for mapped reads that span the filled gaps. If the single copy read
+depth is given with `scdepth=X` then the estimated copy number of the replaced region will also be calculated.
+If no reads span the replaced region, the gap-filling will be reversed. (NOTE: this may cause issues when the full
+assembly is inserted, and future releases may instead use [DepthCharge](https://github.com/slimsuite/depthcharge) to
+identify bad gap-filling.) Such sequences will have an additional `-Xrev` suffix.
+
+The final gap-filled assembly is output to `*.gapfill.fasta`.
+
+Output will be saved to files with a prefix set by `basefile=X` (default named after the `seqin=FILE` prefix).
+For more details, see the Diploidocus documentation.
+
+---
+
+# Running GapSpanner
+
+GapSpanner is written in Python 2.x and can be run directly from the commandline:
+
+    python $CODEPATH/gapspanner.py [OPTIONS]
+
+If running as part of [SLiMSuite](http://slimsuite.blogspot.com/), `$CODEPATH` will be the SLiMSuite `tools/`
+directory. If running from the standalone [GapSpanner git repo](https://github.com/slimsuite/gapspanner), `$CODEPATH`
+will be the path the to `code/` directory. Please see details in the [Snapper git repo](https://github.com/slimsuite/gapspanner)
+for running on example data.
+
+## Dependencies
+
+[minimap2](https://github.com/lh3/minimap2) must be installed and either added to the environment `$PATH` or given to
+GapSpanner with the `minimap2=PROG` setting. For `gapass` or `gapfill` run modes, [samtools](http://www.htslib.org/)
+and the [Flye](https://github.com/fenderglass/Flye) assembler need to be installed.
+
+To generate documentation with `dochtml`, R will need to be installed and a pandoc environment variable must be set, e.g.
+
+    export RSTUDIO_PANDOC=/Applications/RStudio.app/Contents/MacOS/pandoc
+
+For GapSpanner documentation, run with `dochtml=T` and read the `*.docs.html` file generated.
+
+## Commandline options
+
+A list of commandline options can be generated at run-time using the `-h` or `help` flags. Please see the general
+[SLiMSuite documentation](http://slimsuite.blogspot.com/2013/08/command-line-options.html) for details of how to
+use commandline options, including setting default values with **INI files**.
+
+```
+### ~ Main Diploidocus run options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+seqin=FILE      : Input sequence assembly [None]
+runmode=X       : Diploidocus run mode (gapspan/gapass/gapfill) [gapspan]
+basefile=FILE   : Root of output file names [gapspanner or $SEQIN basefile]
+summarise=T/F   : Whether to generate and output summary statistics sequence data before and after processing [True]
+genomesize=INT  : Haploid genome size (bp) [0]
+paf=FILE        : PAF file of long reads mapped onto assembly [$BASEFILE.paf]
+bam=FILE        : BAM file of long reads mapped onto assembly [$BASEFILE.bam]
+reads=FILELIST  : List of fasta/fastq files containing reads. Wildcard allowed. Can be gzipped. []
+readtype=LIST   : List of ont/pb/hifi file types matching reads for minimap2 mapping [ont]
+dochtml=T/F     : Generate HTML Diploidocus documentation (*.docs.html) instead of main run [False]
+tmpdir=PATH     : Path for temporary output files during forking (not all modes) [./tmpdir/]
+### ~ Gaps spanning and reassembly options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+checkflanks=LIST: List of lengths flanking check regions that must also be spanned by reads [0,100,1000,5000]
+subforks=INT    : Number of forks for assembly subproccesses during gapfill and gapass modes [1]
+mingapspan=INT  : Minimum number of reads spanning a gap in order to re-assemble [2]
+minlocid=PERC   : Minimum percentage identity for aligned chunk to be kept (local %identity) [0]
+minloclen=INT   : Minimum length for aligned chunk to be kept (local hit length in bp) [500]
+scdepth=NUM     : Single copy ("diploid") read depth. If zero, will not calculate CNV for filled gaps [0]
+### ~ Re-assembly forking options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+forks=X         : Number of parallel sequences to process at once [0]
+killforks=X     : Number of seconds of no activity before killing all remaining forks. [36000]
+killmain=T/F    : Whether to kill main thread rather than individual forks when killforks reached. [False]
+logfork=T/F     : Whether to log forking in main log [False]
+### ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+```
+
+---
+
+# GapSpanner run modes
+
+### ~ Assembly gap read-spanning analysis [runmode=gapspan] ~ ###
+
+This mode first identifies all the gaps in an assembly (`seqin=FILE`) (using SeqList `gapstats` or `$SEQBASE.gaps.tdt` if pre-
+existing) and then runs the Diploidocus read spanning analysis (`runmode=regcheck`) with `regcnv=F`. Long read data, given
+with the `reads=FILELIST` and `readtype=LIST` options, are mapped onto the assembly using minimap2 to generate a PAF file.
+This is then parsed and reads spanning each gap are identified based on their positions and the target start and end positions in the PAF file.
+In addition to absolute spanning of regions, reads spanning a region +/- distances set by `checkflanks=LIST` will also be calculated. If the end of a
+sequence is reached before the end of the read, this will also count as flanking. Such regions can be identified
+using the `MaxFlank5` and `MaxFlank3` fields, which identify the maximum distance 5' and 3' that a read can span
+due to sequence length constraints.
+
+Spanning `spanid` output is also generated for each gap and saved in `$BASEFILE_spanid`. Each gap will be named:
+`seqname.start-end`.
+
+---
+
+### ~ Assembly gap re-assembly [runmode=gapass] ~ ###
+
+In addition to the `gapspan` analysis, reads identified as spanning each gap are extracted and assembled using `flye`
+in a `$BASEFILE__gapassemble/` output directory.
+
+---
+
+### ~ Re-assembled gap-filling [runmode=gapfill] ~ ###
+
+In addition to the `gapspan` and `gapass` outputs, re-assembled gap regions are compiled into a single file and then
+mapped back on the original assembly using Minimap2, with tabulated hit output into `$BASEFILE__gapfill/`. Local hits
+are reduced to unique coverage of the assembly sequences. Gaps are filled if one of the two conditions are met:
+
+1. A single local alignment spans an entire gap.
+2. A pair of concordant local alignments from the same re-assembly contig (same orientation) flank an entire gap.
+
+In the case of a single spanning local alignment, the entire assembly region is replaced by the corresponding
+re-assembly contig region. For a pair of hits, the region between the two hits is replaced.
+
+
+
+<br>
+<small>&copy; 2021 Richard Edwards | richard.edwards@unsw.edu.au</small>
