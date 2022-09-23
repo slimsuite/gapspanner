@@ -19,8 +19,8 @@
 """
 Module:       rje_obj
 Description:  Contains revised General Object templates for Rich Edwards scripts and bioinformatics programs
-Version:      2.7.1
-Last Edit:    28/04/20
+Version:      2.9.0
+Last Edit:    19/11/21
 Copyright (C) 2011  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -62,10 +62,11 @@ System Commandline:
     soaplab=T/F     : Implement special options/defaults for SoapLab implementations [False]
     rest=X          : Variable that sets the output to be returned by REST services [None]
     screenwrap=X    : Maximum width for some screen outputs [200]
+    loadmod=T/F     : Whether to try to load modules when checking for external programs [True]
 
 Forking Commandline:
     noforks=T/F     : Whether to avoid forks [False]
-    forks=X         : Number of parallel sequences to process at once [0]
+    forks=X         : Number of parallel sequences to process at once (also threads=INT) [0]
     killforks=X     : Number of seconds of no activity before killing all remaining forks. [36000]
 
 Development Commandline:
@@ -120,12 +121,22 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 2.6.0 - Added threads() method to basic object.
     # 2.7.0 - Added loggedSystemCall()
     # 2.7.1 - Fixed formatting for Python 2.6 back compatibility for servers.
+    # 2.7.2 - Tweaked the forks and threads settings and methods.
+    # 2.7.3 - Added generic checkForProgram() method.
+    # 2.8.0 - Added recognition of -cmd=ARG arguments.
+    # 2.8.1 - Fixed ignoredate bug.
+    # 2.9.0 - Expanded checkForProgram() method to
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
     '''
     # [Y] : Get working objects with new str, int, num, bool, dict, list and obj.
+    # [Y] : Add checking for |:;&<> during file/path command loading.
     # [ ] : Add typeCheck() method to cycle through each attribute dictionary and check values are the correct types.
+    # [ ] : Add self.tool list for {External tool:version} following checks.
+    # [ ] : Add general code for checking external programs and populating self.tool with option warnings/exit.
+    # [ ] : Add option to look for `module avail` output and load module if found.
+    #     : - rje.split(os.popen('module avail samtools 2>&1').read())
     '''
 #########################################################################################################################
 import glob, os, pickle, random, string, sys, time, traceback
@@ -200,9 +211,9 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
                     'RunPath':rje.makePath(os.path.abspath(os.curdir)),'RPath':'R','Rest':'None'}
         self.str['Path'] = rje.makePath(os.path.abspath(os.sep.join(sys.argv[0].split(os.sep)[:-1]+[''])))
         self.int = {'Verbose':1,'Interactive':0,'ScreenWrap':200}
-        self.bool = {'DeBug':False,'Win32':False,'PWin':False,'MemSaver':False,'Append':False,'MySQL':False,
+        self.bool = {'DeBug':False,'Win32':False,'PWin':False,'MemSaver':False,'Append':False,'MySQL':False,'IgnoreDate':False,
                      'Force':False,'Pickle':True,'SoapLab':False,'Test':False,'Backups':True,'Silent':False,'Quiet':False,
-                     'Webserver':False,'ProgLog':True,'Warn':True,'Dev':False,'Setup':False,'OSX':False}
+                     'Webserver':False,'ProgLog':True,'Warn':True,'Dev':False,'Setup':False,'OSX':False,'LoadMod':True}
         self.dict = {'Output':{}}
         self.obj['DB'] = None
 #########################################################################################################################
@@ -340,7 +351,9 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         elif self.obj['Parent']: return self.obj['Parent'].getInt(key,default,checkdata)
         else: return default
 #########################################################################################################################
-    def getPerc(self,key=None,default=0.0,checkdata=False): return self.getNum(key,default,checkdata)/100.0
+    def getPerc(self,key=None,default=0.0,checkdata=False): ### Returns a 'perc' attribute type as a proportion
+        '''Convert stored 0-100 scale number, e.g. X=PERC variable, as a 0-1 float.'''
+        return self.getNum(key,default,checkdata)/100.0
     def getNum(self,key=None,default=0.0,checkdata=False):    ### Returns float attribute
         '''Returns float attribute.'''
         try:
@@ -444,7 +457,7 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         elif type == 'dict': att = self.dict
         elif type == 'obj': att = self.obj
         ### Return ###
-        if att.has_key(key): return att[key]
+        if key in att: return att[key]
         else: return default
 #########################################################################################################################
     def setAttribute(self,type,key,newvalue):    ### Sets object information of correct type from string
@@ -534,8 +547,8 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
             self._cmdReadList(cmd,'file',['Basefile','RPath','ErrorLog'])
             self._cmdReadList(cmd,'abspath',['Path','RunPath'])
             self._cmdRead(cmd,type='bool',att='Win32',arg='pwin')
-            self._cmdReadList(cmd,'bool',['DeBug','Win32','PWin','MemSaver','Append','Force','MySQL','Pickle','Test',
-                                         'SoapLab','Backups','Webserver','ProgLog','Dev','Warn','OSX'])
+            self._cmdReadList(cmd,'bool',['DeBug','Win32','PWin','MemSaver','Append','Force','MySQL','Pickle','Test','LoadMod',
+                                         'SoapLab','Backups','Webserver','ProgLog','Dev','Warn','OSX','IgnoreDate'])
         except:
             self.deBug(self.cmd_list)
             self.errorLog('Problem with %s.cmd:%s' % (self,cmd))
@@ -562,9 +575,15 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         ### ~ [0] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         if arg == None: arg = att.lower()
         cmdarg = cmd.split('=')[0].lower()
+        if cmdarg[:1] == '-': cmdarg = cmdarg[1:]
         if cmdarg != arg: return
         value = cmd[len('%s=' % arg):]
         value = value.replace('#DATE',rje.dateTime(dateonly=True))
+        ## ~ [0a] Check files and paths for dodgy characters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+        if type in ['file'] or 'path' in type:
+            for char in '|:;&<>':
+                if char in value:
+                    raise ValueError('Forbidden character "{0}" in {1}={2} file/path.'.format(char,cmdarg,value))
         ### ~ [1] Basic commandline types ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         if type in ['opt','bool']:
             if value[:1].lower() in ['f','0']: self.bool[att] = False
@@ -650,6 +669,7 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
             self._cmdReadList(cmd,'int',['Forks','KillForks'])
             self._cmdRead(cmd,type='bool',att='NoForks')
             self._cmdRead(cmd,type='bool',att='NoForks',arg='nofork')
+            self._cmdRead(cmd,type='int',att='Forks',arg='threads')
         except: self.log.errorLog('Problem with cmd:%s' % cmd)
 #########################################################################################################################
      ### <4> ### Input/Output                                                                                            #
@@ -674,6 +694,9 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         self.printLog(logid,text)
         if debug: self.debug('')
 #########################################################################################################################
+    def backup(self,filename,unlink=True,appendable=True,autobackup=False,warning=''):
+        return rje.backup(self,filename,unlink,appendable,autobackup,warning)
+#########################################################################################################################
     def headLog(self,text,line='~',hash='#',width=0,minside=4):  # Generates a header-style printLog command
         '''
         Generates a header-style printLog command.
@@ -685,11 +708,11 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         '''
         if not width and line in '~-=': width = {'=':90,'-':75,'~':60}[line]
         strlist = [hash,line*minside,text,line*minside,hash]
-        while len(rje.jstring.join(strlist)) < width:
+        while len(rje.stringj.join(strlist)) < width:
             strlist[1] += line
             strlist[3] += line
-        if len(rje.jstring.join(strlist)) == width + 1 and len(strlist[1]) > minside: strlist[1] = strlist[1][:-1]
-        self.printLog('%s%s%s%s' % (hash,line,line,hash),rje.jstring.join(strlist))
+        if len(rje.stringj.join(strlist)) == width + 1 and len(strlist[1]) > minside: strlist[1] = strlist[1][:-1]
+        self.printLog('%s%s%s%s' % (hash,line,line,hash),rje.stringj.join(strlist))
 #########################################################################################################################
     def vPrint(self,text,v=1): return self.verbose(v,text=text)
 #########################################################################################################################
@@ -749,9 +772,10 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         '''
         if text == None: return self.getBool('DeBug')
         pause = pause and self.i() >= 0
+        #if not text.endswith('\n'): text = text + '\n'
         try:
             if self.getBool('DeBug') and pause: self.verbose(self.v(),self.i(),text,1)
-            elif self.getBool('DeBug'): self.verbose(self.v(),self.i()+1,text,1)
+            elif self.getBool('DeBug'): self.verbose(self.v(),self.i()+1,text,0)
         except KeyboardInterrupt:
             if self.yesNo('Interrupt program?'): raise
             if self.yesNo('Switch off Debugging?'): self.bool['DeBug'] = False; self.cmd_list.append('debug=F')
@@ -772,7 +796,8 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
             self.close()    # Cannot pickle file handles.
             ### ~ [2] ~ Pickle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             self.progLog('#SAVE','Attempting to save %s to %s.' % (self.prog(),pfile))
-            pickle.dump(self,open(pfile,'w'))
+            try: pickle.dump(self,open(pfile,'w'))
+            except: pickle.dump(self,open(pfile,'wb'))
             self.printLog('\r#SAVE','%s Intermediate saved as %s (Python pickle).' % (self.prog(),pfile))
             ### ~ [3] ~ GZip and finish ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if not self.getBool('Win32') and gzip:
@@ -805,7 +830,8 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
                     except: self.errorLog('Cannot unzip %s' % (gzfile)); return None
             if os.path.exists(pfile):
                 self.printLog('\r#LOAD','Attempting to load %s.' % pfile,log=False)
-                newme = pickle.load(open(pfile,'r'))
+                try: newme = pickle.load(open(pfile,'r'))
+                except: newme = pickle.load(open(pfile,'rb'))
                 self.printLog('\r#LOAD','%s Intermediate loaded: %s.' % (self.prog(),pfile))
                 if not self.getBool('Win32'):
                     try:
@@ -921,7 +947,7 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         '''
         if checkforce and self.force(): return True
         if not os.path.exists(checkfile): return True
-        if checkdate == None and self.getBool('IgnoreDate',default=False) or checkdate == False: return True
+        if (checkdate == None and self.getBool('IgnoreDate',default=False)) or checkdate == False: return False
         if tiesok and rje.isYounger(checkfile,parentfile) != parentfile: return False
         elif rje.isYounger(parentfile,checkfile) == checkfile: return False
         return True
@@ -1059,7 +1085,37 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         except KeyboardInterrupt: raise
         except: self.errorLog('Problem locating %s source data file' % str,quitchoice=self.getBool('Integrity')); return ''
 #########################################################################################################################
-    def loggedSysCall(self,cmd,syslog=None,stderr=True,append=True,verbosity=1,nologline=None,threaded=True):    ### Makes a system call, catching output in log file
+    def checkForProgram(self,program,report=True,warn=True,needed=False):  ### Checks for program and reports version and/or kills if not found
+        '''
+        Checks for program and reports version and/or kills if not found.
+        :param program: str [required] = Program call to run with --version command
+        :param report: bool [True] = Whether to log the program version
+        :param warn: bool [True] = Whether to warn if no version detected (and needed=False)
+        :param needed: bool [False] = Whether to raise an error if no version detected.
+        :return: version if found, else False
+        '''
+        try:### ~ [0] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if not 'Prog' in self.dict: self.dict['Prog'] = {}
+            if program in self.dict['Prog']: return self.dict['Prog'][program]
+            self.dict['Prog'][program] = False
+            ### ~ [1] Check for version ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            version = os.popen('{} --version 2>&1'.format(program)).readline()
+            if not version or "command not found" in version:
+                if self.getBool('LoadMod'):
+                    self.printLog('#LOAD', 'Module loading not yet implemented!')
+                if needed: raise ValueError('Cannot run "{0} --version": check installation'.format(program))
+                elif warn: self.warnLog('Cannot run "{0} --version": check installation'.format(program))
+                return False
+            version = rje.chomp(version)
+            if version[:1] != 'v' and version.split()[0] not in ['samtools','R']:
+                version = 'v' + version
+            self.dict['Prog'][program] = version
+            if report:
+                self.printLog('#PROGV','{0}: {1} detected'.format(program,version))
+            return version
+        except: raise
+#########################################################################################################################
+    def loggedSysCall(self,cmd,syslog=None,stderr=True,append=True,verbosity=1,nologline=None,threaded=True,slimfarmer=None):    ### Makes a system call, catching output in log file
         '''
         Makes a system call, catching output in log file.
         :param cmd:str = System call command to catch
@@ -1068,6 +1124,7 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         :param append:bool [False] = Whether to append the log if it exists
         :param verbosity:int [1] = Verbosity level at which output also goes to screen (tee, not redirect)
         :param nologline:str [None] = Default logline returned if nothing is in the log
+        :param threaded:bool [True] = Sets ppn to 1 if calling with qsub (dev mode only)
         :return: last line of syslog output
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
@@ -1092,8 +1149,9 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
                 if self.v() >= verbosity: cmd = '{0} | tee {1}'.format(cmd,syslog)
                 else: cmd = '{0} > {1}'.format(cmd,syslog)
             ### ~ [2] ~ Process System Call ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            if self.dev() and self.getBool('UseQSub'):
+            if self.getBool('UseQSub') and slimfarmer:
                 if not rje.exists('tmp_qsub'): rje.mkDir(self,'tmp_qsub/',log=True)
+                mydir = os.path.abspath('.')
                 qbase = rje.baseFile(syslog)
                 ppn = self.threads()
                 vmem = self.getInt('QSubVMem')
@@ -1297,6 +1355,8 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
 #########################################################################################################################
     ### <5> ### Forks                                                                                                   #
 #########################################################################################################################
+    def forks(self): return self.threads()
+#########################################################################################################################
     def threads(self):  ### Returns number of threads to use (forks=INT with min=1)
         '''
         Returns number of threads to use (forks=INT with min=1)
@@ -1337,7 +1397,7 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         >> datadict = Dictionary of values to add to self.dict[dictkey]
         '''
         try:
-            if not self.dict.has_key(dictkey): self.dict[dictkey] = {}
+            if dictkey not in self.dict: self.dict[dictkey] = {}
             for key in datadict.keys(): self.dict[dictkey][key] = datadict[key]
         except: self.errorLog('Problem with setDictData()',True)
 #########################################################################################################################
@@ -1354,10 +1414,10 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         '''
         try:### ~ [0] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             dictlist = []
-            if self.dict.has_key('Data'): dictlist = [self.dict['Data']]
+            if 'Data' in self.dict: dictlist = [self.dict['Data']]
             ddict = {'str':self.str,'int':self.int,'num':self.num,'bool':self.bool}
             for dict in dlist:
-                if ddict.has_key(dict): dictlist.append(ddict[dict])
+                if dict in ddict: dictlist.append(ddict[dict])
                 else: dictlist.append(dict)
             ### ~ [1] ~ Look in dictionaries ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             data = default
@@ -1518,7 +1578,7 @@ class RJE_Object(object):     ### Metaclass for inheritance by other classes
         '''
         Scan through file to find line starting with word.
         >> key:str = self.file key.
-        >> wordlist:str = list of words to find at beginning of line using string.split()
+        >> wordlist:str = list of words to find at beginning of line using rje.split()
         >> asdict:bool [True] = return {word:line} dictionary (blank if missing). !!! Assumes unique line per word !!!
         >> wrap:bool [True] = Whether to scan whole file, jumping to start if end reached.
         >> chomp:bool [True] = Whether to strip /r and /n from end of line.

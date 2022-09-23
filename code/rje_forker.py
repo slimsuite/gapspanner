@@ -87,7 +87,7 @@ def cmdHelp(info=None,out=None,cmd_list=[]):   ### Prints *.__doc__ and asks for
         ### ~ [2] ~ Look for help commands and print options if found ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         help = cmd_list.count('help') + cmd_list.count('-help') + cmd_list.count('-h')
         if help > 0:
-            print '\n\nHelp for %s %s: %s\n' % (info.program, info.version, time.asctime(time.localtime(info.start_time)))
+            rje.printf('\n\nHelp for {0} {1}: {2}\n'.format(info.program, info.version, time.asctime(time.localtime(info.start_time))))
             out.verbose(-1,4,text=__doc__)
             if rje.yesNo('Show general commandline options?'): out.verbose(-1,4,text=rje.__doc__)
             if rje.yesNo('Quit?'): sys.exit()           # Option to quit after help
@@ -97,7 +97,7 @@ def cmdHelp(info=None,out=None,cmd_list=[]):   ### Prints *.__doc__ and asks for
         return cmd_list
     except SystemExit: sys.exit()
     except KeyboardInterrupt: sys.exit()
-    except: print 'Major Problem with cmdHelp()'
+    except: rje.printf('Major Problem with cmdHelp()')
 #########################################################################################################################
 def setupProgram(): ### Basic Setup of Program when called from commandline.
     '''
@@ -108,16 +108,19 @@ def setupProgram(): ### Basic Setup of Program when called from commandline.
     '''
     try:### ~ [1] ~ Initial Command Setup & Info ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         info = makeInfo()                                   # Sets up Info object with program details
+        if len(sys.argv) == 2 and sys.argv[1] in ['version','-version','--version']: rje.printf(info.version); sys.exit(0)
+        if len(sys.argv) == 2 and sys.argv[1] in ['details','-details','--details']: rje.printf('%s v%s' % (info.program,info.version)); sys.exit(0)
+        if len(sys.argv) == 2 and sys.argv[1] in ['description','-description','--description']: rje.printf('%s: %s' % (info.program,info.description)); sys.exit(0)
         cmd_list = rje.getCmdList(sys.argv[1:],info=info)   # Reads arguments and load defaults from program.ini
         out = rje.Out(cmd_list=cmd_list)                    # Sets up Out object for controlling output to screen
-        out.verbose(2,2,cmd_list,1)                         # Prints full commandlist if verbosity >= 2 
+        out.verbose(2,2,cmd_list,1)                         # Prints full commandlist if verbosity >= 2
         out.printIntro(info)                                # Prints intro text using details from Info object
         cmd_list = cmdHelp(info,out,cmd_list)               # Shows commands (help) and/or adds commands from user
         log = rje.setLog(info,out,cmd_list)                 # Sets up Log object for controlling log file output
         return (info,out,log,cmd_list)                      # Returns objects for use in program
     except SystemExit: sys.exit()
     except KeyboardInterrupt: sys.exit()
-    except: print 'Problem during initial setup.'; raise
+    except: rje.printf('Problem during initial setup.'); raise
 #########################################################################################################################
 ### END OF SECTION I                                                                                                    #
 #########################################################################################################################
@@ -180,6 +183,18 @@ class Forker(rje_obj.RJE_Object):
         ### ~ Other Attributes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self._setForkAttributes()   # Delete if no forking
 #########################################################################################################################
+    def _setForkerAttributes(self):   ### Sets additional Forkter Attributes of Object
+        '''Sets Attributes of Object.'''
+        ### ~ Basics ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+        self.boollist += ['PIDCheck','RjePy','LogFork','KillMain']
+        self.intlist += ['IOLimit']
+        self.numlist += ['MemFree','ForkSleep','KillForks','KillTime']
+        self.listlist += ['ToFork','Forked','ResFile']
+        ### ~ Defaults ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+        self.setBool({'RjePy':False,'LogFork':True,'KillMain':True})
+        self.setInt({'IOLimit':50})
+        self.setNum({'MemFree':0.0,'ForkSleep':0.0,'KillForks':36000,'KillTime':time.time()})
+#########################################################################################################################
     def _cmdList(self):     ### Sets Attributes from commandline
         '''
         Sets attributes according to commandline parameters:
@@ -204,6 +219,24 @@ class Forker(rje_obj.RJE_Object):
                 #self._cmdReadList(cmd,'glist',['Att']) # List of files using wildcards and glob
                 #self._cmdReadList(cmd,'cdict',['Att']) # Splits comma separated X:Y pairs into dictionary
                 #self._cmdReadList(cmd,'cdictlist',['Att']) # As cdict but also enters keys into list
+            except: self.errorLog('Problem with cmd:%s' % cmd)
+        if self.parent(): self.baseFile(self.parent().baseFile()) # Set basefile to be the same as parent object
+        if self.getNum('MemFree') > 0.0 and self.getBool('Win32'): self.warnLog('Cannot use memfree=X in win32 mode')
+        if self.getNum('MemFree') > 0.0 and self.getBool('OSX'): self.warnLog('Cannot use memfree=X in win32 mode')
+        self.int['IOError'] = self.int['IOLimit']
+#########################################################################################################################
+    def _forkerCmd(self):     ### Sets additional Forker Attributes from commandline
+        '''
+        Sets attributes according to commandline parameters:
+        - see .__doc__ or run with 'help' option
+        '''
+        for cmd in self.cmd_list:
+            try:
+                self._cmdReadList(cmd,'path',['ForkDir'])  # String representing directory path
+                self._cmdReadList(cmd,'bool',['KillMain','LogFork','PIDCheck','RjePy'])  # True/False Booleans
+                self._cmdReadList(cmd,'int',['IOLimit'])   # Integers
+                self._cmdReadList(cmd,'float',['MemFree','ForkSleep','KillForks']) # Floats
+                self._cmdReadList(cmd,'list',['ToFork'])  # List of strings (split on commas or file lines)
             except: self.errorLog('Problem with cmd:%s' % cmd)
         if self.parent(): self.baseFile(self.parent().baseFile()) # Set basefile to be the same as parent object
         if self.getNum('MemFree') > 0.0 and self.getBool('Win32'): self.warnLog('Cannot use memfree=X in win32 mode')
@@ -248,7 +281,7 @@ class Forker(rje_obj.RJE_Object):
                 try:
                     pid = fdict['PID']
                     if pidcheck: PIDCHECK.write('%s: %s\n' % (self.list['Forked'].index(fdict),pid))
-                    if string.split('%s' % pid)[0] == 'WAIT': status = 1
+                    if rje.split('%s' % pid)[0] == 'WAIT': status = 1
                     else: (status,exit_stat) = os.waitpid(pid,os.WNOHANG)
                 except:
                     self.errorLog('!')
@@ -264,7 +297,7 @@ class Forker(rje_obj.RJE_Object):
                 self.verbose(0,1,'\n%d seconds of main thread inactivity. %d forks still active!' % (self.getNum('KillForks'),len(self.list['Forked'])),1)
                 for fdict in self.list['Forked']:
                     self.verbose(0,2,' => Fork %s, PID %d still Active!' % (fdict['ID'],fdict['PID']),1)
-                if (self.i() < 0 and self.getBool('KillMain')) or rje.yesNo('Kill Main Thread?'):
+                if (self.i() < 0 and self.getBool('KillMain')) or rje.yesNo('Kill Main Thread?',default={True:'N',False:'Y'}[self.getBool('KillMain')]):
                     raise ValueError('%d seconds of main thread inactivity. %d forks still active!' % (self.getNum('KillForks'),len(self.list['Forked'])))
                 elif self.i() < 0 or rje.yesNo('Kill hanging forks?'):
                     self.printLog('#KILL','KillForks=%d seconds walltime reached.' % (self.getNum('KillForks')))
@@ -294,7 +327,7 @@ class Forker(rje_obj.RJE_Object):
         '''Sets a new fork going using the data in fdict.'''
         try:### ~ [0] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             fdict['cmd'] = self.list['ToFork'].pop(0)
-            fdict['ID'] = 'Fork %d' % self.list['Forked'].index(fdict)
+            fdict['ID'] = 'Fork -%d' % (len(self.list['ToFork'])+1)
             fdict['FID'] = 'f_%s' % rje.randomString(6)
             if self.getBool('RjePy'):
                 fdict['Log'] = '%s%s.log' % (self.getStr('RunPath'),fdict['FID'])
@@ -323,7 +356,9 @@ class Forker(rje_obj.RJE_Object):
                     fromfile = '%s.%s' % (fdict['FID'],resfile)
                     if not rje.exists(fromfile): continue #self.warnLog('Results file %s missing!' % fromfile); continue
                     tofile = '%s.%s' % (self.baseFile(),resfile)
-                    if rje.exists(tofile): open(tofile,'a').writelines(open(fromfile,'r').readlines()[1:])
+                    if rje.exists(tofile):
+                        open(tofile,'a').writelines(open(fromfile,'r').readlines()[1:])
+                        os.unlink(fromfile)
                     else: rje.fileTransfer(fromfile,tofile)
             if 'Log' in fdict:
                 if 'cmd' in fdict:
@@ -335,7 +370,7 @@ class Forker(rje_obj.RJE_Object):
                     self.printLog('#~~#','#~~#',timeout=False)
                 #if self.dev(): self.deBug(fdict['Log'])
                 #if self.dev(): self.deBug(rje.exists(fdict['Log']))
-            elif 'PID' in fdict and string.split('%s' % fdict['PID'])[0] == 'WAIT': pass
+            elif 'PID' in fdict and rje.split('%s' % fdict['PID'])[0] == 'WAIT': pass
             else: self.printLog('#END','Fork %s ended.' % fdict['PID'],log=self.getBool('LogFork'),screen=self.getBool('LogFork') or self.v() > 1)
         except IOError:
             if self.getInt('IOError') == 1: self.errorLog('Forker.endFork IOError limit reached'); raise
@@ -356,9 +391,9 @@ class Forker(rje_obj.RJE_Object):
 #########################################################################################################################
     def freeMem(self):  ### Returns proportion of free system memory                                                #V0.0
         if self.getBool('Win32') or self.getBool('OSX'): return 0.0
-        try: memdata = string.split(os.popen('free').readlines()[1])
+        try: memdata = rje.split(os.popen('free').readlines()[1])
         except: self.errorLog('Unable to read free memory',printerror=False); return 0.0
-        return string.atof(memdata[3]) / string.atof(memdata[1])
+        return rje.atof(memdata[3]) / rje.atof(memdata[1])
 #########################################################################################################################
 ### End of SECTION II: Forker Class                                                                                     #
 #########################################################################################################################
@@ -382,11 +417,11 @@ def runMain():
     ### ~ [1] ~ Basic Setup of Program  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     try: (info,out,mainlog,cmd_list) = setupProgram()
     except SystemExit: return  
-    except: print 'Unexpected error during program setup:', sys.exc_info()[0]; return
+    except: rje.printf('Unexpected error during program setup:', sys.exc_info()[0]); return
     
     ### ~ [2] ~ Rest of Functionality... ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     try:#NewClass(mainlog,cmd_list).run()
-        print rje_obj.zen(), '\n\n *** No standalone functionality! *** \n\n'
+        rje.printf('{0}\n\n *** No standalone functionality! *** \n\n'.format(rje_obj.zen()))
 
     ### ~ [3] ~ End ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     except SystemExit: return  # Fork exit etc.
@@ -396,7 +431,7 @@ def runMain():
 #########################################################################################################################
 if __name__ == "__main__":      ### Call runMain 
     try: runMain()
-    except: print 'Cataclysmic run error:', sys.exc_info()[0]
+    except: rje.printf('Cataclysmic run error: {0}'.format(sys.exc_info()[0]))
     sys.exit()
 #########################################################################################################################
 ### END OF SECTION IV                                                                                                   #

@@ -1,7 +1,7 @@
 # GapSpanner: Genome assembly gap long read support and reassembly tool
 
 ```
-GapSpanner v0.0.0
+GapSpanner v0.1.1
 ```
 
 For a better rendering and navigation of this document, please download and open [`./docs/gapspanner.docs.html`](./docs/gapspanner.docs.html), or visit <https://slimsuite.github.io/gapspanner/>.
@@ -68,7 +68,7 @@ GapSpanner is written in Python 2.x and can be run directly from the commandline
 
 If running as part of [SLiMSuite](http://slimsuite.blogspot.com/), `$CODEPATH` will be the SLiMSuite `tools/`
 directory. If running from the standalone [GapSpanner git repo](https://github.com/slimsuite/gapspanner), `$CODEPATH`
-will be the path the to `code/` directory. Please see details in the [Snapper git repo](https://github.com/slimsuite/gapspanner)
+will be the path the to `code/` directory. Please see details in the [GapSpanner git repo](https://github.com/slimsuite/gapspanner)
 for running on example data.
 
 ## Dependencies
@@ -90,9 +90,9 @@ A list of commandline options can be generated at run-time using the `-h` or `he
 use commandline options, including setting default values with **INI files**.
 
 ```
-### ~ Main Diploidocus run options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+### ~ Main GapSpanner run options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 seqin=FILE      : Input sequence assembly [None]
-runmode=X       : Diploidocus run mode (gapspan/gapass/gapfill) [gapspan]
+runmode=X       : GapSpanner run mode (gapspan/gapass/gapfill) [gapspan]
 basefile=FILE   : Root of output file names [gapspanner or $SEQIN basefile]
 summarise=T/F   : Whether to generate and output summary statistics sequence data before and after processing [True]
 genomesize=INT  : Haploid genome size (bp) [0]
@@ -100,7 +100,7 @@ paf=FILE        : PAF file of long reads mapped onto assembly [$BASEFILE.paf]
 bam=FILE        : BAM file of long reads mapped onto assembly [$BASEFILE.bam]
 reads=FILELIST  : List of fasta/fastq files containing reads. Wildcard allowed. Can be gzipped. []
 readtype=LIST   : List of ont/pb/hifi file types matching reads for minimap2 mapping [ont]
-dochtml=T/F     : Generate HTML Diploidocus documentation (*.docs.html) instead of main run [False]
+dochtml=T/F     : Generate HTML GapSpanner documentation (*.docs.html) instead of main run [False]
 tmpdir=PATH     : Path for temporary output files during forking (not all modes) [./tmpdir/]
 ### ~ Gaps spanning and reassembly options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 checkflanks=LIST: List of lengths flanking check regions that must also be spanned by reads [0,100,1000,5000]

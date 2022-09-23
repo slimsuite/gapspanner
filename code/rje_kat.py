@@ -17,46 +17,37 @@
 # To incorporate this module into your own programs, please see GNU Lesser General Public License disclaimer in rje.py
 
 """
-Module:       rje_rmd
-Description:  R Markdown generation and execution module
+Module:       rje_kat
+Description:  KAT wrapper and parser
 Version:      0.1.0
-Last Edit:    01/02/21
-Copyright (C) 2019  Richard J. Edwards - See source code for GNU License Notice
+Last Edit:    27/09/21
+Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
-    The function of this module will be added here.
-
-    The R markdown itself is run using:
-
-    Rscript -e 'library(rmarkdown); rmarkdown::render("/path/to/test.Rmd", "html_document")'
-
-    NOTE: The "html_document" over-rules the content of the file itself, e.g. "pdf_document" can turn it into a PDF
-    rather than HTML.
-
-    NOTE: Running the above generates a `*.html` file in the same place as the `*.Rmd` file (not the run directory).
-
-    NOTE: For HTML output, R must be installed and a pandoc environment variable must be set, e.g.
-
-        export RSTUDIO_PANDOC=/Applications/RStudio.app/Contents/MacOS/pandoc
+    This module has no standalone functions. The KAT object is designed to be inherited by other RJE program objects.
 
 Commandline:
-
+    ### ~ Main KAT wrapper run options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+    seqin=FILE          : Input sequence assembly [None]
+    basefile=FILE       : Root of output file names [$SEQIN basefile]
+    kmerreads=FILELIST  : File of high quality reads for KAT kmer analysis []
+    10xtrim=T/F         : Whether to trim 16bp 10x barcodes from Read 1 of Kmer Reads data for KAT analysis [False]
     ### ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 """
 #########################################################################################################################
 ### SECTION I: GENERAL SETUP & PROGRAM DETAILS                                                                          #
 #########################################################################################################################
-import glob, os, string, sys, time
+import os, string, sys, time
 slimsuitepath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)),'../')) + os.path.sep
 sys.path.append(os.path.join(slimsuitepath,'libraries/'))
 sys.path.append(os.path.join(slimsuitepath,'tools/'))
 ### User modules - remember to add *.__doc__ to cmdHelp() below ###
-import rje, rje_obj
+import rje, rje_db, rje_obj
 #########################################################################################################################
 def history():  ### Program History - only a method for PythonWin collapsing! ###
     '''
     # 0.0.0 - Initial Compilation.
-    # 0.1.0 - Added docHTML.
+    # 0.1.0 - Fixed _setKatAttributes bug.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -67,14 +58,12 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Create initial working version of program.
     # [ ] : Add REST outputs to restSetup() and restOutputOrder()
     # [ ] : Add to SLiMSuite or SeqSuite.
-    # [Y] : Rscript -e 'library(rmarkdown); rmarkdown::render("/path/to/test.Rmd", "html_document")'
-    # [ ] : Add logging of Rmd outputs
     '''
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('RJE_Rmd', '0.1.0', 'January 2021', '2019')
-    description = 'R Markdown generation and execution module'
+    (program, version, last_edit, copy_right) = ('RJE_KAT', '0.0.0', 'September 2021', '2021')
+    description = 'KAT wrapper and parser'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_obj.zen()]
     return rje.Info(program,version,last_edit,description,author,time.time(),copy_right,comments)
@@ -89,7 +78,7 @@ def cmdHelp(info=None,out=None,cmd_list=[]):   ### Prints *.__doc__ and asks for
         if cmd_help > 0:
             rje.printf('\n\nHelp for {0} {1}: {2}\n'.format(info.program, info.version, time.asctime(time.localtime(info.start_time))))
             out.verbose(-1,4,text=__doc__)
-            if rje.yesNo('Show general commandline options?'): out.verbose(-1,4,text=rje.__doc__)
+            if rje.yesNo('Show general commandline options?',default='N'): out.verbose(-1,4,text=rje.__doc__)
             if rje.yesNo('Quit?'): sys.exit()           # Option to quit after help
             cmd_list += rje.inputCmds(out,cmd_list)     # Add extra commands interactively.
         elif out.stat['Interactive'] > 1: cmd_list += rje.inputCmds(out,cmd_list)    # Ask for more commands
@@ -113,7 +102,7 @@ def setupProgram(): ### Basic Setup of Program when called from commandline.
         if len(sys.argv) == 2 and sys.argv[1] in ['description','-description','--description']: rje.printf('%s: %s' % (info.program,info.description)); sys.exit(0)
         cmd_list = rje.getCmdList(sys.argv[1:],info=info)   # Reads arguments and load defaults from program.ini
         out = rje.Out(cmd_list=cmd_list)                    # Sets up Out object for controlling output to screen
-        out.verbose(2,2,cmd_list,1)                         # Prints full commandlist if verbosity >= 2
+        out.verbose(2,2,cmd_list,1)                         # Prints full commandlist if verbosity >= 2 
         out.printIntro(info)                                # Prints intro text using details from Info object
         cmd_list = cmdHelp(info,out,cmd_list)               # Shows commands (help) and/or adds commands from user
         log = rje.setLog(info,out,cmd_list)                 # Sets up Log object for controlling log file output
@@ -128,15 +117,21 @@ def setupProgram(): ### Basic Setup of Program when called from commandline.
                                                     ### ~ ### ~ ###
 
 #########################################################################################################################
-### SECTION II: Rmd Class                                                                                               #
+### SECTION II: KAT Class                                                                                               #
 #########################################################################################################################
-class Rmd(rje_obj.RJE_Object):
+class KAT(rje_obj.RJE_Object):
     '''
-    Rmd Class. Author: Rich Edwards (2019).
+    KAT Class. Author: Rich Edwards (2021).
+
+    This class is designed for being inherited. In this case:
+    - add self._setKatAttributes() to the _setAttributes() method
+    - add self._katCmd(cmd) to parse kat options
 
     Str:str
-    
+    - SeqIn=FILE      : Input sequence assembly []
+
     Bool:boolean
+    - 10xTrim=T/F     : Whether to trim 16bp 10x barcodes from Read 1 of Kmer reads data [False]
 
     Int:integer
 
@@ -145,11 +140,12 @@ class Rmd(rje_obj.RJE_Object):
     File:file handles with matching str filenames
     
     List:list
-    - CodeChunks = List of code chunk names to avoid duplication
+    - KmerReads=FILELIST   : File of reads for KAT kmer analysis []
 
     Dict:dictionary    
 
     Obj:RJE_Objects
+    - DB = Database Object
     '''
 #########################################################################################################################
     ### <1> ### Class Initiation etc.: sets attributes                                                                  #
@@ -157,23 +153,29 @@ class Rmd(rje_obj.RJE_Object):
     def _setAttributes(self):   ### Sets Attributes of Object
         '''Sets Attributes of Object.'''
         ### ~ Basics ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-        self.strlist = []
-        self.boollist = []
+        self.strlist = ['SeqIn']
+        self.boollist = ['10xTrim']
         self.intlist = []
         self.numlist = []
         self.filelist = []
-        self.listlist = ['CodeChunks']
+        self.listlist = ['KmerReads']
         self.dictlist = []
         self.objlist = []
         ### ~ Defaults ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self._setDefaults(str='None',bool=False,int=0,num=0.0,obj=None,setlist=True,setdict=True,setfile=True)
         self.setStr({})
-        self.setBool({})
+        self.setBool({'10xTrim':False})
         self.setInt({})
         self.setNum({})
-        self.list['CodeChunks'] = []
         ### ~ Other Attributes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self._setForkAttributes()   # Delete if no forking
+        self._setKatAttributes()
+#########################################################################################################################
+    def _setKatAttributes(self):       ### Sets forking attributes for use in all classes
+        '''Sets general forking attributes for use in all classes.'''
+        self.str['SeqIn'] = 'None'
+        self.list['KmerReads'] = []
+        self.bool['10xTrim'] = False
 #########################################################################################################################
     def _cmdList(self):     ### Sets Attributes from commandline
         '''
@@ -184,23 +186,33 @@ class Rmd(rje_obj.RJE_Object):
             try:
                 self._generalCmd(cmd)   ### General Options ### 
                 self._forkCmd(cmd)  # Delete if no forking
-                ### Class Options (No need for arg if arg = att.lower()) ### 
+                self._katCmd(cmd)   # Parse kat options
+                ### Class Options (No need for arg if arg = att.lower()) ###
                 #self._cmdRead(cmd,type='str',att='Att',arg='Cmd')  # No need for arg if arg = att.lower()
                 #self._cmdReadList(cmd,'str',['Att'])   # Normal strings
                 #self._cmdReadList(cmd,'path',['Att'])  # String representing directory path 
-                #self._cmdReadList(cmd,'file',['Att'])  # String representing file path 
+                #self._cmdReadList(cmd,'file',['SeqIn'])  # String representing file path
                 #self._cmdReadList(cmd,'date',['Att'])  # String representing date YYYY-MM-DD
-                #self._cmdReadList(cmd,'bool',['Att'])  # True/False Booleans
+                #self._cmdReadList(cmd,'bool',['10xTrim'])  # True/False Booleans
                 #self._cmdReadList(cmd,'int',['Att'])   # Integers
                 #self._cmdReadList(cmd,'float',['Att']) # Floats
                 #self._cmdReadList(cmd,'min',['Att'])   # Integer value part of min,max command
                 #self._cmdReadList(cmd,'max',['Att'])   # Integer value part of min,max command
                 #self._cmdReadList(cmd,'list',['Att'])  # List of strings (split on commas or file lines)
                 #self._cmdReadList(cmd,'clist',['Att']) # Comma separated list as a *string* (self.str)
-                #self._cmdReadList(cmd,'glist',['Att']) # List of files using wildcards and glob
+                #self._cmdReadList(cmd,'glist',['KmerReads']) # List of files using wildcards and glob
                 #self._cmdReadList(cmd,'cdict',['Att']) # Splits comma separated X:Y pairs into dictionary
                 #self._cmdReadList(cmd,'cdictlist',['Att']) # As cdict but also enters keys into list
             except: self.errorLog('Problem with cmd:%s' % cmd)
+#########################################################################################################################
+    def _katCmd(self,cmd):     ### Sets Attributes from commandline
+        '''
+        Sets attributes according to commandline parameters:
+        - see .__doc__ or run with 'help' option
+        '''
+        self._cmdReadList(cmd,'file',['SeqIn'])  # String representing file path
+        self._cmdReadList(cmd,'bool',['10xTrim'])  # True/False Booleans
+        self._cmdReadList(cmd,'glist',['KmerReads']) # List of files using wildcards and glob
 #########################################################################################################################
     ### <2> ### Main Class Backbone                                                                                     #
 #########################################################################################################################
@@ -209,8 +221,7 @@ class Rmd(rje_obj.RJE_Object):
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             self.setup()
             ### ~ [2] ~ Add main run code here ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            self.rmdTest()
-            return
+            return self.katKmers()
         except:
             self.errorLog(self.zen())
             raise   # Delete this if method error not terrible
@@ -218,171 +229,113 @@ class Rmd(rje_obj.RJE_Object):
     def setup(self):    ### Main class setup method.
         '''Main class setup method.'''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            return True     # Setup successful
+            self.obj['DB'] = rje_db.Database(self.log,self.cmd_list+['tuplekeys=T'])
+            if not self.baseFile(return_none=''):
+                if self.getStrLC('SeqIn'): self.baseFile(rje.baseFile(self.getStr('SeqIn'),strip_path=True))
+            self.printLog('#BASE','Output file basename: %s' % self.baseFile())
         except: self.errorLog('Problem during %s setup.' % self.prog()); return False  # Setup failed
 #########################################################################################################################
-    def restSetup(self):    ### Sets up self.dict['Output'] and associated output options if appropriate.
-        '''
-        Run with &rest=docs for program documentation and options. A plain text version is accessed with &rest=help.
-        &rest=OUTFMT can be used to retrieve individual parts of the output, matching the tabs in the default
-        (&rest=format) output. Individual `OUTFMT` elements can also be parsed from the full (&rest=full) server output,
-        which is formatted as follows:
-
-        ###~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~###
-        # OUTFMT:
-        ... contents for OUTFMT section ...
-        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
-
-        ### Available REST Outputs:
-        There is currently no specific help available on REST output for this program.
-        '''
-        try:### ~ [0] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            for outfmt in self.restOutputOrder(): self.dict['Output'][outfmt] = 'No output generated.'
-            #!# Add specific program output here. Point self.dict['Output'][&rest=X] to self.str key.
-            return
-        except: self.errorLog('RestSetup error')
+    ### <3> ### KAT run Methods                                                                                         #
 #########################################################################################################################
-    def restOutputOrder(self): return rje.sortKeys(self.dict['Output'])
+    def checkForKat(self,report=True):
+        return self.checkForProgram('kat',report,needed=False)
 #########################################################################################################################
-    ### <3> ### Rmd Output Methods                                                                                      #
-#########################################################################################################################
-    def rmdKnit(self,rmdfile,document='html',stdout=False):  ### Knit Rmd to HTML/PDF file
+    def katKmers(self,assembly=None,kmerfiles=None,basefile=None,force=None,trim10x=True):    ### Performs read kmer kat sect analysis
         '''
-        Knit Rmd to HTML/PDF file.
-        >> rmdfile:str = R markdown file to knit
-        >> document:str ['html'] = type of document to knit into
-        << success:bool = whether output is generated
+        Performs read kmer kat sect analysis. Generates:
+        - '{0}.kat-stats.tsv'.format(basefile) = kmer summary per sequence
+        - '{1}.kat-counts.cvg'.format(basefile) = kmer counts per position (CVG format)
+        >> assembly:str [None] = Assembly file. Will use self.getStr('SeqIn') if None
+        >> kmerfiles:list [None] = files for setting kmers to count (self.list['KmerReads'] if None)
+        >> basefile:bool [None] = output file prefix (self.baseFile() if None)
+        >> force:bool [None] = whether to overwrite existing files (self.force() if None)
+        >> trim10x:bool [True] = Whether to check 10xtrim setting.
+        << katfile or None if failed
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            outfile = '%s.%s' % (rje.baseFile(rmdfile),document)
-            rcmd = 'Rscript -e \'library(rmarkdown); rmarkdown::render("%s", "%s_document")\'' % (rmdfile,document)
-            self.printLog('#RCMD',rcmd)
-            rcmd += ' 2>&1'
-            if self.v() < 2 and not stdout: os.popen(rcmd).read()
+            if not self.checkForKat(report=True): return None
+            if not assembly: assembly = self.getStr('SeqIn')
+            seqin = assembly
+            if kmerfiles:
+                if type(kmerfiles) == type('str'):
+                    kmerfiles = [kmerfiles]
             else:
-                self.progLog('#RCMD','Knitting %s...' % (rmdfile))
-                os.system(rcmd)
-            success = rje.exists(outfile)
-            if success: self.printLog('#RCMD','%s generated from %s' % (outfile,rmdfile))
-            else:
-                self.printLog('#SYS','If pandoc error, try setting global variable: export RSTUDIO_PANDOC=/Applications/RStudio.app/Contents/MacOS/pandoc')
-                self.printLog('#SYS','If no pandoc error, check that required libraries in %s are installed' % rmdfile)
-                raise IOError('%s not created' % outfile)
-            return True
-        except: self.errorLog('%s.rmdKnit error: check R installation' % self.prog()); return False
+                if not self.list['KmerReads']:
+                    self.printLog('#KAT','Cannot use KAT kmer analysis without KmerReads data')
+                    return None
+                kmerfiles = self.list['KmerReads']
+            rje.checkForFiles(filelist=[seqin]+kmerfiles,basename='',log=self.log,cutshort=False,ioerror=True,missingtext='Not found: aborting KAT run.')
+            if not basefile: basefile = self.baseFile(return_none=None)
+            if not basefile: self.baseFile(rje.baseFile(assembly,strip_path=True))
+            if force == None: force = self.force()
+            katfile = '{}.kat-stats.tsv'.format(basefile)
+            # seq_name        median  mean    gc%     seq_length      kmers_in_seq    invalid_kmers   %_invalid       non_zero_kmers  %_non_zero      %_non_zero_corrected
+            katcvg =  '{}.kat-counts.cvg'.format(basefile)
+            #i# Check for files
+            if not force and rje.checkForFiles(filelist=[katfile,katcvg],basename='',log=self.log,cutshort=False,ioerror=False,missingtext='Not found: will generate.'):
+                return katfile
+            self.backup(katfile,appendable=False)
+            self.backup(katcvg,appendable=False)
+            ### ~ [2] Run KAT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            katcall = 'kat sect -t {} -o {}.kat {} {}'.format(self.threads(),basefile,seqin,' '.join(kmerfiles))
+            if trim10x and self.getBool('10xTrim'):
+                trim5 = ['16'] + ['0'] * (len(self.list['KmerReads']) - 1)
+                trim5 = ','.join(trim5)
+                katcall = 'kat sect -t {} --5ptrim {} -o {}.kat {} {}'.format(self.threads(),trim5,basefile,seqin,' '.join(kmerfiles))
+            self.printLog('#SYS',katcall)
+            #i# Catching completion in case KAT hangs after running
+            KAT = os.popen(katcall)
+            while not KAT.readline().startswith('Total runtime'): continue
+            KAT.close()
+            ### ~ [3] Check for outputs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if rje.checkForFiles(filelist=[katfile,katcvg],basename='',log=self.log,cutshort=False,ioerror=True,missingtext='Not found: KAT failed?'):
+                return katfile
+        except: self.errorLog('%s.katKmers error' % self.prog()); return None
 #########################################################################################################################
-    def rmdOutput(self,rmdfile=None,header={},elements=[]):    ### Generate Rmd output file
+    def selfKat(self,assembly=None): ### Performs self KAT search
         '''
-        Generate Rmd output file. Call self.rmdKnit(rmdfile) to convert to another format.
-        >> rmdfile:str [self.str['RmdFile']] = Full/relative path to Rmd output file.
-        >> header:dict {} = Dictionary of Rmd header elements. Will default to self.log.obj['Info'] and HTML.
-        >> elements:list [] = List of tuples (type,content) to output into file. For R code, content will be a dictionary
-
-        This method puts together the basic elements of an R markdown file into a text document that can be knitted into
-        HTML or PDF using self.rmdKnit().
+        Performs self KAT search.
+        >> assembly:str [None] = Assembly file. Will use self.getStr('SeqIn') if None
+        '''
+        try:### ~ [1] Assembly versus self ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if not assembly: assembly = self.getStr('SeqIn')
+            basefile = self.baseFile(return_none=None)
+            if not basefile: self.baseFile(rje.baseFile(assembly, strip_path=True))
+            basefile = '{0}.self'.format(self.basefile())
+            return self.katKmers(assembly=assembly,basefile=basefile,kmerfiles=[assembly],trim10x=False)
+        except: self.errorLog('%s.selfKat error' % self.prog())
+#########################################################################################################################
+    ### <4> ### KAT Parse Methods                                                                                       #
+#########################################################################################################################
+    def parseKat(self,katfile=None,name='kat',diploidocus=False):   ### Parse main KAT file into 'kat' database table and returns.
+        '''
+        Parse main KAT file into 'kat' database table and returns.
+        >> katfile:str [$BASEFILE.kat-stats.tsv] = KAT summary file to read into table.
+        >> name:str ['kat'] = Name for database table
+        >> diploidocus:bool [False] = Whether to rename fields in line with Diploidocus
+        << katdb
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            return
-
-        except: self.errorLog('%s.rmdOutput error' % self.prog())
+            db = self.db()
+            if not katfile: katfile = '{}.kat-stats.tsv'.format(self.baseFile())
+            ### ~ [2] Parse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            # seq_name median mean gc% seq_length kmers_in_seq invalid_kmers %_invalid non_zero_kmers %_non_zero %_non_zero_corrected
+            katdb = db.addTable(katfile, mainkeys=['seq_name'], expect=True, name=name)
+            ## ~ [2a] Diploidocus ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+            # SeqName MedK AvgK SeqGC KPerc
+            if katdb and diploidocus:
+                katdb.renameField('seq_name','SeqName')
+                katdb.renameField('median','MedK')
+                katdb.renameField('mean','AvgK')
+                katdb.renameField('gc%','SeqGC')
+                katdb.renameField('%_non_zero_corrected','KPerc')
+                katdb.setFields(['SeqName','MedK','AvgK','SeqGC','KPerc'])
+                for entry in katdb.entries(): entry['SeqName'] = entry['SeqName'].split()[0]
+                katdb.remakeKeys()
+            return katdb
+        except: self.errorLog('%s.parseKat error' % self.prog()); return None
 #########################################################################################################################
-    def rmdHead(self,title=None,author=None,date=None,extra=[],setup=True,toc=True):    ### Generate Rmd output file
-        '''
-        Generate Rmd output file. Call self.rmdKnit(rmdfile) to convert to another format.
-        >> rmdfile:str [self.str['RmdFile']] = Full/relative path to Rmd output file.
-        >> header:dict {} = Dictionary of Rmd header elements. Will default to self.log.obj['Info'] and HTML.
-        >> elements:list [] = List of tuples (type,content) to output into file. For R code, content will be a dictionary
-
-        This method puts together the basic elements of an R markdown file into a text document that can be knitted into
-        HTML or PDF using self.rmdKnit().
-        '''
-        try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            rcode = '---\n'
-            if not title: title = '%s - %s' % (self.prog(),self.basefile())
-            rcode += 'title: "%s"\n' % title
-            if not author: author = self.log.obj['Info'].author
-            rcode += 'author: "%s"\n' % author
-            if not date: date = rje.dateTime(dateonly=True)
-            rcode += 'date: "%s"\n' % date   #07/02/2019
-            for (key,value) in extra:
-                rcode += '%s: "%s"\n' % (key,value)
-            rcode += 'output:\n  html_document:\n    css: http://www.slimsuite.unsw.edu.au/stylesheets/slimhtml.css\n'
-            if toc: rcode += rje.join(['    toc: true','    toc_float: true','    toc_collapsed: false','    toc_depth: 3','    number_sections: true',''],'\n')
-            rcode += '---\n\n'
-
-            if setup:
-                rcode += '%s\n\n<a name="Top" />\n\n' % setupTest
-
-            self.debug(rcode)
-            return rcode
-        except: self.errorLog('%s.rmdOutput error' % self.prog())
-#########################################################################################################################
-    def rmdTable(self,delimfile=None,name='dbtable',codesection=True,loadtable=True,showtable=True,delim='tab',kable=None,rows=10,cols=10):  ### Output table
-        '''
-        Output table. If the table is larger than rows tall, or cols wide, paged_table will be used. Otherwise, kable
-        will be used. This can be over-ridden by setting kable=True, or kable=False (for paged_table).
-        :param delimfile: delimited text file
-        :param name: name for data.frame (and code section if needed)
-        :param codesection: give R code wrapping text
-        :param loadtable: load table into R object
-        :param showtable: display the table
-        :param delimit: tab/csv
-        :return: text of Rmd code chunk
-        '''
-        try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            rcode = '# Load and display %s\n' % name
-            # Read table
-            if loadtable:
-                rcode = '# Load and display %s\n' % delimfile
-                if delim == 'csv':
-                    rcode += '%s <- read.csv("%s", header = TRUE, stringsAsFactors = FALSE, comment.char = "")\n' % (name,delimfile)
-                else:
-                    rcode += '%s <- read.delim("%s", header = TRUE, stringsAsFactors = FALSE, comment.char = "", fill = TRUE)\n' % (name,delimfile)
-            # Show table
-            if showtable:
-                if kable == None:
-                    rcode += 'if(nrow(%s) > %d | ncol(%s) > %d){\n' % (name,rows,name,cols)
-                    rcode += '    rmarkdown::paged_table(%s)\n' % (name)
-                    rcode += '}else{\n'
-                    rcode += '    knitr::kable(%s, row.names = FALSE)\n' % name
-                    rcode += '}\n'
-                elif kable:
-                    rcode += 'knitr::kable(%s, row.names = FALSE)\n' % name
-                else:
-                    #rcode += 'rmarkdown::paged_table(%s, options = list(rows.print = %d, max.print = %d, cols.print = %d, rownames.print = FALSE))\n' % (name,rows,max,cols)
-                    #rcode += 'rmarkdown::paged_table(%s, options = list(rows.print = %d))\n' % (name,rows)
-                    rcode += 'paged_table(%s)\n' % (name)
-            # Code section
-            if codesection:
-                codename = name
-                if codename in self.list['CodeChunks']:
-                    i = 1
-                    while '%s%d' % (name,i) in self.list['CodeChunks']: i += 1
-                    codename = '%s%d' % (name,i)
-                self.list['CodeChunks'].append(codename)
-                rcode = '```{r %s, echo=FALSE}\n%s\n```\n\n' % (codename,rcode)
-            # Return text
-            return rcode
-        except: self.errorLog('%s.rmdOutput error' % self.prog())
-#########################################################################################################################
-    def rmdTest(self):  ### Generates a test Rmd File
-        '''Generates a test Rmd File.'''
-        try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            rmdfile = self.basefile() + '.Rmd'
-            RMD = open(rmdfile,'w')
-            RMD.write(self.rmdHead())
-            #RMD.write(setupTest)
-            RMD.write(mdTest)
-            RMD.write(rcodeTest)
-            RMD.write('## Tables\n\n')
-            for tdtfile in glob.glob('*.tdt'):
-                RMD.write('```\n%s\n```\n\n%s\n\n' % (tdtfile,self.rmdTable(tdtfile)))
-            RMD.write(htmlTest)
-            RMD.close()
-            self.rmdKnit(rmdfile)
-        except: self.errorLog('%s.rmdOutput error' % self.prog())
-#########################################################################################################################
-### End of SECTION II: Rmd Class                                                                                        #
+### End of SECTION II: KAT Class                                                                                        #
 #########################################################################################################################
 
                                                     ### ~ ### ~ ###
@@ -390,64 +343,7 @@ class Rmd(rje_obj.RJE_Object):
 #########################################################################################################################
 ### SECTION III: MODULE METHODS                                                                                         #
 #########################################################################################################################
-def docHTML(self):  ### Generate Rmd and HTML documents from main run() method docstring.
-    '''Generate Rmd and HTML documents from main run() method docstring.'''
-    try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-        info = self.log.obj['Info']
-        if not self.getStrLC('Basefile'): self.baseFile(info.program.lower())
-        prog = '%s V%s' % (info.program,info.version)
-        rmd = Rmd(self.log,self.cmd_list)
-        rtxt = rmd.rmdHead(title='%s Documentation' % prog,author='Richard J. Edwards',setup=True)
-        #!# Replace this with documentation text?
-        rtxt += rje.replace(self.run.__doc__,'\n        ','\n')
-        rtxt += '\n\n<br>\n<small>&copy; 2021 Richard Edwards | richard.edwards@unsw.edu.au</small>\n'
-        rmdfile = '%s.docs.Rmd' % self.baseFile()
-        open(rmdfile,'w').write(rtxt)
-        self.printLog('#RMD','RMarkdown %s documentation output to %s' % (prog,rmdfile))
-        rmd.rmdKnit(rmdfile)
-    except:
-        self.errorLog(self.zen())
-        raise   # Delete this if method error not terrible
-#########################################################################################################################
-headTest = '''---
-title: "RJE_RMD"
-author: "Rich Edwards"
-date: "07/02/2019"
-output: html_document
----
-'''
-#########################################################################################################################
-setupTest = '''
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-'''
-#########################################################################################################################
-mdTest = '''
-## R Markdown
 
-<a name="aname">?</a>
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-Trying some internal links:
-
-* [cars](#cars)
-* [head2](#rmarkdown)
-* [aname](#aname)
-'''
-#########################################################################################################################
-rcodeTest = '''
-```{r cars}
-summary(cars)
-```
-'''
-#########################################################################################################################
-htmlTest = '''
-<hr>
-<small>&copy; Richard Edwards 2019</small>
-
-'''
 #########################################################################################################################
 ### END OF SECTION III                                                                                                  #
 #########################################################################################################################
@@ -464,7 +360,7 @@ def runMain():
     except: rje.printf('Unexpected error during program setup:', sys.exc_info()[0]); return
     
     ### ~ [2] ~ Rest of Functionality... ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-    try: Rmd(mainlog,['basefile=test']+cmd_list).run()
+    try: KAT(mainlog,cmd_list).run()
 
     ### ~ [3] ~ End ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     except SystemExit: return  # Fork exit etc.

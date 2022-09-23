@@ -19,8 +19,8 @@
 """
 Module:       rje
 Description:  Contains SLiMSuite and Sequite General Objects
-Version:      4.23.0
-Last Edit:    21/08/20
+Version:      4.23.1
+Last Edit:    15/10/21
 Copyright (C) 2005  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -174,6 +174,7 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 4.22.4 - Added some Python 2.6 back-compatbility for the server.
     # 4.22.5 - Added checking of glist inputs.
     # 4.23.0 - Added rje_py2 and rje_py3 code divergence for Python3 compatibility development.
+    # 4.23.1 - Added HPC etc. warning for i>=0.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -183,7 +184,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 import glob, hashlib, math, os, pickle, random, re, string, sys, time, traceback
 py3 = False
-jstring = ' '
+stringj = ' '
 try:
     import urllib2 as urllib
     import rje_py2 as rje_py
@@ -191,7 +192,8 @@ except:
     import urllib.request as urllib
     py3 = True
     import rje_py3 as rje_py
-    print('>>> Python 3.x detected but not fully supported. Please report odd behaviour <<<')
+    if len(sys.argv) != 2 or sys.argv[1] not in ['version', '-version', '--version', 'details', '-details', '--details', 'description', '-description', '--description']:
+        print('>>> Python 3.x detected but not fully supported. Please report odd behaviour <<<')
 try:
    set
 except NameError:
@@ -266,7 +268,7 @@ class RJE_Object_Shell(object):     ### Metaclass for inheritance by other class
         self.info = {'Name':'None','Basefile':'None','Delimit':getDelimit(self.cmd_list),'Rest':'None',
                      'RunPath':makePath(os.path.abspath(os.curdir)),'ErrorLog':'None',
                      'RPath':'R'}
-        #self.info['Path'] = makePath(os.path.abspath(string.join(string.split(sys.argv[0],os.sep)[:-1]+[''],os.sep)))
+        #self.info['Path'] = makePath(os.path.abspath(join(split(sys.argv[0],os.sep)[:-1]+[''],os.sep)))
         self.info['Path'] = makePath(os.path.abspath(os.sep.join(sys.argv[0].split(os.sep)[:-1]+[''])))
         self.stat = {'Verbose':1,'Interactive':0}
         self.opt = {'DeBug':False,'Win32':False,'PWin':False,'MemSaver':False,'Append':False,'MySQL':False,'Force':False,
@@ -382,7 +384,8 @@ class RJE_Object_Shell(object):     ### Metaclass for inheritance by other class
         ### ~ [0] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         if arg == None: arg = att.lower()
         cmdarg = cmd.split('=')[0].lower()
-        if cmdarg not in [arg,'-{0}'.format(arg)]: return
+        if cmdarg[:1] == '-': cmdarg = cmdarg[1:]
+        if cmdarg != arg: return
         value = cmd[len('{0}='.format(arg)):]
         value = value.replace('#DATE',dateTime(dateonly=True))
         ### ~ [1] Basic commandline types ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
@@ -549,7 +552,8 @@ class RJE_Object_Shell(object):     ### Metaclass for inheritance by other class
                     except: self.errorLog('Cannot unzip %s' % (gzfile)); return None
             if os.path.exists(pfile):
                 self.progLog('\r#LOAD','Attempting to load %s.' % pfile)
-                newme = pickle.load(open(pfile,'r'))
+                try: newme = pickle.load(open(pfile,'r'))
+                except: newme = pickle.load(open(pfile,'rb'))
                 self.printLog('\r#LOAD','%s Intermediate loaded: %s.' % (self.prog(),pfile))
                 if not self.opt['Win32']:
                     try:
@@ -1076,7 +1080,7 @@ class RJE_Object(RJE_Object_Shell):     ### Metaclass for inheritance by other c
                 self.log.printLog('#LOAD','Loading data from %s ...' % openfile,newline=False,log=False)
             file_lines = open(openfile, 'r').readlines()
             if len(file_lines) == 1: file_lines = file_lines[0].split('\r')
-            #if chomplines: file_lines = string.split(chomp(string.join(file_lines,'!#ENDOFLINE#!')),'!#ENDOFLINE#!')
+            #if chomplines: file_lines = split(chomp(join(file_lines,'!#ENDOFLINE#!')),'!#ENDOFLINE#!')
             if chomplines: file_lines = chomp('!#ENDOFLINE#!'.join(file_lines)).split('!#ENDOFLINE#!')
             if v <= self.stat['Verbose']:
                 self.log.printLog('\r#LOAD','Loading data from %s complete: %s lines.' % (openfile,integerString(len(file_lines))),log=False)
@@ -1554,7 +1558,7 @@ class RJE_ObjectLite(RJE_Object_Shell):     ### Metclass for inheritance by othe
 #########################################################################################################################
     ### <2> ### Object Attributes                                                                                       #
 #########################################################################################################################
-    def details(self): return attDetails(printblanks=False)  ### Prints Details to screen
+    def details(self): return self.attDetails(printblanks=False)  ### Prints Details to screen
     def attDetails(self,types=['All'],printblanks=True):     ### Prints Details to screen
         '''Returns object details as text.'''
         try:### ~ [0] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
@@ -2447,6 +2451,21 @@ def memoryUse(who=None): ### Returns memory usage in kb
 #     for el in inlist: outlist.append(str(el))
 #     return outlist
 #########################################################################################################################
+def atoi(instr): return int(instr)
+def atof(instr): return float(instr)
+def strip(instr,chars): return instr.strip(chars)
+#########################################################################################################################
+def count(instr,sub,start=0,end=-1):  ### Replaces the old string module count function
+    if end < 0: end = len(instr)
+    return instr.count(sub,start,end)
+#########################################################################################################################
+def join(inlist,sep=' '):   ### Replaces the old string module join function
+    return sep.join(inlist)
+#########################################################################################################################
+def split(instr,separator=None,maxsplit=-1,sep=None): ### Replaces the old string split function
+    if sep and not separator: separator = sep
+    return instr.split(separator,maxsplit)
+#########################################################################################################################
 def fixASCII(text,error='replace'): ### Converts non-ASCII string to ASCII
     return text.decode('ascii','replace').encode('ascii',error)
 #########################################################################################################################
@@ -2489,7 +2508,7 @@ def strSentence(instr,allwords=False,pure=False):     # Changes to sentence case
     if allwords:
         newstr = []
         for word in instr.split(): newstr.append(strSentence(word,pure=pure))
-        return jstring.join(newstr)
+        return stringj.join(newstr)
     if pure: instr[:1].upper() + instr[1:].lower()
     return instr[:1].upper() + instr[1:]
 #########################################################################################################################
@@ -2555,7 +2574,7 @@ def strSort(text,unique=False):   ### Returns sorted string
 #########################################################################################################################
 def strList(text,unique=False):   ### Returns string as list
     '''Returns string as list.'''
-    if not unique: return jstring.join(text).split()
+    if not unique: return stringj.join(text).split()
     letters = []
     for x in text:
         if not unique or x not in letters: letters.append(x)
@@ -2563,7 +2582,7 @@ def strList(text,unique=False):   ### Returns string as list
 #########################################################################################################################
 def strRearrange(text): ### Returns all possible orders of letters as list
     '''Returns all possible orders of letters as list.'''
-    letters = jstring.join(text).split()
+    letters = stringj.join(text).split()
     bases = ['']; variants = []
     for i in range(len(text)):
         variants = []
@@ -2625,7 +2644,10 @@ def fileSafeString(instr,replacestr=''):  ### Returns a string that is safe for 
 #########################################################################################################################
 def md5hash(instr): return hashlib.md5(instr).hexdigest()
 #########################################################################################################################
-def replace(instr,oldstr,newstr): return instr.replace(oldstr,newstr)
+def replace(instr,oldstr,newstr,maxrep=-1):
+    if maxrep > 0:
+        return instr.replace(oldstr, newstr, maxrep)
+    return instr.replace(oldstr,newstr)
 #########################################################################################################################
 ### End of String Functions                                                                                             #
 #########################################################################################################################
@@ -3185,8 +3207,7 @@ def sortKeys(dic,revsort=False):  ### Returns sorted keys of dictionary as list
     >> dic:dictionary object
     >> revsort:boolean = whether to reverse list before returning
     '''
-    dkeys = dic.keys()
-    dkeys.sort()
+    dkeys = sorted(dic.keys())
     if revsort: dkeys.reverse()
     return dkeys
 #########################################################################################################################
@@ -3297,7 +3318,7 @@ def valueSortedKeys(data,rev=False):    ### Returns list of keys, sorted by valu
     if rev: sorter.reverse()
     valsorted = []
     for val in sorter:
-        for d in sortdict.keys()[0:]:
+        for d in list(sortdict.keys())[0:]:
             if data[d] == val: valsorted.append(d); sortdict.pop(d)
     return valsorted
 #########################################################################################################################
@@ -3400,6 +3421,11 @@ def numList(inlist): ### Converts inlist to floats and returns
     '''Converts inlist to integers and returns.'''
     outlist = []
     for x in inlist: outlist.append(float(x))
+    return outlist
+#########################################################################################################################
+def decodeList(inlist): ### Decodes list of binaries to unicode
+    outlist = []
+    for x in inlist: outlist.append(x.decode('UTF-8'))
     return outlist
 #########################################################################################################################
 def iLen(inlist): return integerString(len(inlist))
@@ -4576,8 +4602,8 @@ def setLog(info,out,cmd_list,printlog=True,fullcmd=True):  ### Makes Log Object 
             log.printLog('#LOG','Activity Log for {0} V{1}: {2}'.format(info.program,info.version,time.asctime(time.localtime(info.start_time))),screen=False)
             if py3: log.warnLog('Python 3.x detected but not fully supported. Please report odd behaviour.')
             log.printLog('#DIR','Run from directory: {0}'.format(os.path.abspath(os.curdir)),screen=False)
-            log.printLog('#ARG','Commandline arguments: {0}'.format(jstring.join(argcmd)),screen=False)
-            #log.printLog('#CMD','Program arguments: %s' % jstring.join(cmd_list),screen=False)
+            log.printLog('#ARG','Commandline arguments: {0}'.format(stringj.join(argcmd)),screen=False)
+            #log.printLog('#CMD','Program arguments: %s' % stringj.join(cmd_list),screen=False)
             for infowarn in info.warnings:
                 if infowarn[0] == '#WARN':
                     log.warnLog(infowarn[1])
@@ -4590,6 +4616,8 @@ def setLog(info,out,cmd_list,printlog=True,fullcmd=True):  ### Makes Log Object 
             if fullcmd: log.printLog('#CMD','Full Command List: {0}'.format(argString(tidyArgs(cmd_list))),screen=False)
             log.printLog('#VIO','Verbosity: {0}; Interactivity: {1}.'.format(log.v(),log.i()))
             if log.dev() or log.test(): log.printLog('#DEV','Development mode: {0}; Testing mode: {1}.'.format(log.dev(),log.test()))
+            if log.i() >= 0:
+                log.printLog('#NOTE','Interactivity could cause problems for queued HPC jobs etc. If so, set i=-1.')
             if log.info['ErrorLog'].lower() not in ['','none']:
                 log.printLog('#~~#','#~~#',timeout=False,screen=False,error=True)
                 log.printLog('#LOG','Error Log for {0} {1}: {2}'.format(info.program,info.version,time.asctime(time.localtime(info.start_time))),screen=False,error=True)
@@ -4673,7 +4701,7 @@ def argString(arglist):    ### Returns correctly formatted string of commandline
             (opt,val) = cmd.split('=',1)
             argstr.append('{0}="{1}"'.format(opt,val))
         else: argstr.append(cmd)
-    return jstring.join(argstr)
+    return stringj.join(argstr)
 #########################################################################################################################
 ###  End of Input Command Functions                                                                                     #
 #########################################################################################################################

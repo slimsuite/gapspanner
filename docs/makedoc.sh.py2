@@ -1,10 +1,10 @@
-python3 ../code/gapspanner.py dochtml newlog i=-1
+python ../code/gapspanner.py dochtml newlog
 
-python3 ../code/gapspanner.py --description | sed 's/^/# /' > ../GapSpanner.md
+python ../code/gapspanner.py --description | sed 's/^/# /' > ../GapSpanner.md
 echo >> ../GapSpanner.md
 
 echo '```' >> ../GapSpanner.md
-python3 ../code/gapspanner.py --details >> ../GapSpanner.md
+python ../code/gapspanner.py --details >> ../GapSpanner.md
 echo '```' >> ../GapSpanner.md
 echo >> ../GapSpanner.md
 echo 'For a better rendering and navigation of this document, please download and open [`./docs/gapspanner.docs.html`](./docs/gapspanner.docs.html), or visit <https://slimsuite.github.io/gapspanner/>.' >> ../GapSpanner.md
